@@ -21,6 +21,7 @@ ZLIB_MATLAB_ERR_ID(WRONG_NUM_OUTPUTS, "WrongNumberOfOutputs");
 ZLIB_MATLAB_ERR_ID(WRONG_NUM_INPUTS, "WrongNumberOfInputs");
 ZLIB_MATLAB_ERR_ID(INVALID_INPUT, "InvalidInput");
 ZLIB_MATLAB_ERR_ID(OUT_OF_MEMORY, "OutOfMemory");
+ZLIB_MATLAB_ERR_ID(BUFFER_EXHAUSTED, "BufferExhausted");
 ZLIB_MATLAB_ERR_ID(WRONG_LIBRARY_VERSION, "WrongLibraryVersion");
 ZLIB_MATLAB_ERR_ID(UNKNOWN_ERROR, "UnknownError");
 
@@ -107,25 +108,42 @@ mxArray * createOutput(std::uint8_t *data,
 }
 
 
-void throwZLibError(int rc) {
+void throwZLibError(int rc, const z_stream &stream) {
+    const char *errID = nullptr;
+    std::string msg;
+
     switch (rc) {
     case Z_STREAM_ERROR:
-        mexErrMsgIdAndTxt(INVALID_INPUT, "Invalid input");
+        errID = INVALID_INPUT;
+        msg = "Invalid input";
         break;
     case Z_DATA_ERROR:
-        mexErrMsgIdAndTxt(INVALID_INPUT, "Input data is corrupted");
+        errID = INVALID_INPUT;
+        msg = "Input data is corrupted";
         break;
     case Z_MEM_ERROR:
-        mexErrMsgIdAndTxt(OUT_OF_MEMORY, "Out of memory");
+        errID = OUT_OF_MEMORY;
+        msg = "Out of memory";
+        break;
+    case Z_BUF_ERROR:
+        errID = BUFFER_EXHAUSTED;
+        msg = "Buffer exhausted";
         break;
     case Z_VERSION_ERROR:
-        mexErrMsgIdAndTxt(WRONG_LIBRARY_VERSION,
-                          "Incompatible library version");
+        errID = WRONG_LIBRARY_VERSION;
+        msg = "Incompatible library version";
         break;
     default:
-        mexErrMsgIdAndTxt(UNKNOWN_ERROR, "Unknown error (%d)", rc);
+        errID = UNKNOWN_ERROR;
+        msg = "Unknown error (" + std::to_string(rc) + ")";
         break;
     }
+
+    if (stream.msg) {
+        msg += ": " + std::string(stream.msg);
+    }
+
+    mexErrMsgIdAndTxt(errID, msg.c_str());
 }
 
 
@@ -166,7 +184,7 @@ mxArray * compress(int numInputs, const mxArray *inputs[]) {
                            8,
                            Z_DEFAULT_STRATEGY);
     if (Z_OK != rc) {
-        throwZLibError(rc);
+        throwZLibError(rc, stream);
     }
     DeflateEnd de(stream);
 
@@ -175,7 +193,7 @@ mxArray * compress(int numInputs, const mxArray *inputs[]) {
 
     rc = deflate(&stream, Z_FINISH);
     if (Z_STREAM_END != rc) {
-        throwZLibError(rc);
+        throwZLibError(rc, stream);
     }
 
     return createOutput(outputData, outputDataSize, stream);
@@ -211,7 +229,7 @@ mxArray * decompress(int numInputs, const mxArray *inputs[]) {
 
     auto rc = inflateInit2(&stream, windowBits);
     if (Z_OK != rc) {
-        throwZLibError(rc);
+        throwZLibError(rc, stream);
     }
     InflateEnd ie(stream);
 
@@ -233,7 +251,7 @@ mxArray * decompress(int numInputs, const mxArray *inputs[]) {
     } while (true);
 
     if (Z_STREAM_END != rc) {
-        throwZLibError(rc);
+        throwZLibError(rc, stream);
     }
 
     return createOutput(outputData, outputDataSize, stream);
